@@ -4,16 +4,19 @@ from typing import List, Dict
 import copy
 import numpy as np
 
+import os
+from ament_index_python.packages import get_package_share_directory
+
 import rclpy 
 from rclpy.node import Node
 from rclpy.executors import ExternalShutdownException
 from rclpy.exceptions import ROSInterruptException
-from geometry_msgs.msg import Twist, TransformStamped
+from geometry_msgs.msg import Twist, TwistStamped
 from motion_stack.core.utils.joint_state import JState
 from motion_stack.api.ros2.joint_api import JointHandler
 from motion_stack.ros2.utils.conversion import ros_to_time
 
-from hero_vehicle_policy import HeroVehiclePolicy
+from rl_inference_pkg.hero_vehicle_policy import HeroVehiclePolicy
 
 class RlPolicyNode(Node):
     '''
@@ -28,21 +31,24 @@ class RlPolicyNode(Node):
             Twist, 
             '/cmd_vel', 
             self.cmd_vel_listener_callback, 
-            10)
+            10
+        )
         
         self.base_vel_subscriber_  = self.create_subscription(
-            TransformStamped, 
-            f'/{base_name}_base_vel', 
+            TwistStamped, 
+            '/rl_base_vel', 
             self.base_vel_listener_callback, 
-            10)
+            10
+        )
+
+        self.get_logger().info("RL Policy Inference has been initialized.")
 
         self.policy = policy
         self.front_wheel = JointHandler(self, limbs[0])
         self.rear_wheel = JointHandler(self, limbs[1])
         self.leg = JointHandler(self, limbs[2])
 
-        self.action = None
-        self.base_velocity= None
+        self.base_velocity = None
         self.command = None
 
         # max cmd vel in m/s and rad/s
@@ -50,7 +56,7 @@ class RlPolicyNode(Node):
         self.CMD_ANG_VEL_MAX = 0.25
 
         # ordered joint names for vehicle mode policy
-        self.JOINT_ORDER = [
+        self.JOINT_ORDER: List[str] = [
             f"wheel{limbs[0]}_left_joint",
             f"wheel{limbs[0]}_right_joint",
             f"wheel{limbs[1]}_left_joint",
@@ -69,57 +75,70 @@ class RlPolicyNode(Node):
 
         self.timer = self.create_timer(0.02,self.timer_callback) # 200 Hz
 
-    def cmd_vel_listener_callback(self, msg):
+    def cmd_vel_listener_callback(self, msg: Twist):
         # vel command only has 3 dims, x, y and rz. 
-        self.command = [np.clip(msg.linear.x, self.CMD_LIN_VEL_MAX, -self.CMD_LIN_VEL_MAX),
-                        np.clip(msg.linear.y, self.CMD_LIN_VEL_MAX, -self.CMD_LIN_VEL_MAX), 
-                        np.clip(msg.angular.z, self.CMD_ANG_VEL_MAX, -self.CMD_ANG_VEL_MAX)]
+        self.command = [
+            np.clip(msg.linear.x, -self.CMD_LIN_VEL_MAX, self.CMD_LIN_VEL_MAX),
+            np.clip(msg.linear.y, -self.CMD_LIN_VEL_MAX, self.CMD_LIN_VEL_MAX), 
+            np.clip(msg.angular.z, -self.CMD_ANG_VEL_MAX, self.CMD_ANG_VEL_MAX)
+        ]
 
-    def base_vel_listener_callback(self, msg):
-        # base velocity given as a translation and rotation (implicitly over time, see base_velocity_node.py)
-        self.base_velocity = [msg.transform.translation.x,
-                              msg.transform.translation.y,
-                              msg.transform.translation.z, 
-                              msg.transform.rotation.w,
-                              msg.transform.rotation.x,
-                              msg.transform.rotation.y,
-                              msg.transform.rotation.z]
+    def base_vel_listener_callback(self, msg:TwistStamped):
+        self.base_velocity = [
+            msg.twist.linear.x,
+            msg.twist.linear.y,
+            msg.twist.linear.z,
+            msg.twist.angular.x,
+            msg.twist.angular.y,
+            msg.twist.angular.z
+        ]
 
-    def send_action(self, action):
+    def send_action(self, action: List[float]):
         
         # check all joints' Future if they are ready. 
         if not (self.front_wheel.ready.done() and self.rear_wheel.ready.done() and self.leg.ready.done()):
+            self.get_logger().info("No actions were sent.")
             return
         ##
         # add check if velocity is prrrrrrrrrrrrrrrroperly sent without the position
         ##
         ros_now = ros_to_time(self.get_clock().now())
-        front_wheel_cmd = [JState(name=self.JOINT_ORDER[i], time=ros_now, velocity=action[i]) for i in range(0,2)]
-        rear_wheel_cmd = [JState(name=self.JOINT_ORDER[i], time=ros_now, velocity=action[i]) for i in range(2,4)]
-        leg_cmd = [JState(name=self.JOINT_ORDER[i], time=ros_now, position=action[i]) for i in range(4,9)]
+        front_wheel_cmd = {self.JOINT_ORDER[i]: action[i] for i in range(0, 2)}
+        rear_wheel_cmd = {self.JOINT_ORDER[i]: action[i] for i in range(2, 4)}
+        leg_cmd = {self.JOINT_ORDER[i]: action[i] for i in range(4, 9)}
 
-        self.front_wheel.send(front_wheel_cmd)
-        self.rear_wheel.send(rear_wheel_cmd)
-        self.leg.send(leg_cmd)
+        # send the commands using the dictionary
+        self.front_wheel.send([JState(name=name, time=ros_now, velocity=value) for name, value in front_wheel_cmd.items()])
+        self.rear_wheel.send([JState(name=name, time=ros_now, velocity=value) for name, value in rear_wheel_cmd.items()])
+        self.leg.send([JState(name=name, time=ros_now, position=value) for name, value in leg_cmd.items()])
 
         # keep joints outside action space still
-        leg_js_dict = {js.name: js.position for js in self.leg.states.items()}
-        leg_no_cmd = [JState(name=self.JOINT_STILL[i], time=ros_now, position = leg_js_dict[self.JOINT_STILL[i]]) for i in range(len(self.JOINT_STILL))]
+        # leg_js_dict = {js.name: js.position for js in self.leg.states.items()}
+        leg_js_dict = {js.name: js.position for js in self.leg.states}
+        leg_no_cmd = [JState(name=name, time=ros_now, position=leg_js_dict[name]) for name in self.JOINT_STILL]
         self.leg.send(leg_no_cmd)
+
+        self.get_logger().info("Action successfully sent.")
 
     def get_states_pos(self) -> Dict[str, JState]:
         out = {}
-        out.update({v.name:v for v in self.front_wheel.states.items()})
-        out.update({v.name:v for v in self.rear_wheel.states.items()})
-        out.update({v.name:v for v in self.leg.states.items()})
+        # out.update({v.name:v for v in self.front_wheel.states.items()})
+        # out.update({v.name:v for v in self.rear_wheel.states.items()})
+        # out.update({v.name:v for v in self.leg.states.items()})
+        out.update({v.name:v for v in self.front_wheel.states})
+        out.update({v.name:v for v in self.rear_wheel.states})
+        out.update({v.name:v for v in self.leg.states})
         return copy.deepcopy(out)
 
     def timer_callback(self):
 
+        # self.get_logger().info(f"Command: {self.command}")
+        # self.get_logger().info(f"Base velocity: {self.base_velocity}")
+
         states = self.get_states_pos()
 
         useful_states = [states.get(k) for k in self.JOINT_ORDER]
-
+        
         if None in useful_states:
             return
         
@@ -134,6 +153,8 @@ class RlPolicyNode(Node):
         )
 
         action = self.policy.get_action(obs)
+
+        self.get_logger().info(f"Action being sent: {action}")
 
         self.send_action(action)
 

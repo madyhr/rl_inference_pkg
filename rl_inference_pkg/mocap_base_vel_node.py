@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+
+from typing import List
+
 import rclpy 
 from rclpy.time import Time
 from rclpy.node import Node
@@ -12,14 +15,14 @@ import numpy as np
 import quaternion
 
 
-class base_vel_sub_pub_node(Node):
+class mocap_base_vel_node(Node):
     '''
-    Converts a base pose time series from MoCap published at topic '/{tf_name}' to
-    a base velocity (Twist) published at topic '/{base_name}_base_vel'
+    Converts PoseStamped msgs from MoCap published at topic '/{tf_name}' to
+    a base velocity (TwistStamped) published at topic '/rl_base_vel'
     '''
 
-    def __init__(self,tf_name):
-        super().__init__("base_vel_sub_pub")
+    def __init__(self, tf_name: str):
+        super().__init__("mocap_base_vel")
 
         self.base_pose_subscriber_ = self.create_subscription(
             PoseStamped, 
@@ -29,7 +32,7 @@ class base_vel_sub_pub_node(Node):
         
         self.base_vel_publisher_ = self.create_publisher(
             TwistStamped,
-            f'/base_vel',
+            f'/rl_base_vel',
             10
         )
         self.data = None
@@ -63,20 +66,26 @@ class base_vel_sub_pub_node(Node):
 
         self.base_vel_publisher_.publish(msg)
 
-    def time_difference(self, pose1: PoseStamped, pose2: PoseStamped):
-        t1 = Time.from_msg(pose1.header.stamp)
-        t2 = Time.from_msg(pose2.header.stamp)
+    def time_difference(self, previous_pose: PoseStamped, current_pose: PoseStamped) -> float:
+        """
+        Computes time difference in seconds between current pose and previous pose.
+
+        Returns:
+        float -- time difference
+        """
+        t1 = Time.from_msg(previous_pose.header.stamp)
+        t2 = Time.from_msg(current_pose.header.stamp)
         # time difference in seconds
-        dt = (t2 - t1).nanoseconds * 1e-9  
+        dt: float = (t2 - t1).nanoseconds * 1e-9  
         return dt
 
-    def angular_velocity_quat(self, current_pose: PoseStamped, previous_pose: PoseStamped, dt: float):
+    def angular_velocity_quat(self, previous_pose: PoseStamped, current_pose: PoseStamped,dt: float) -> List[float]:
         """
-        Computes angular velocity quaternion given current pose and time difference, dt.
+        Computes angular velocity given current pose, previous pose and time difference, dt.
         Careful: numpy-quaternion uses (w,x,y,z) format while ROS2 uses (x,y,z,w) format. 
 
         Returns:
-        List[float] -- angular velocity
+        List[float] -- angular velocities
         """ 
         if not dt > 0:
             return [0.0, 0.0, 0.0]
@@ -95,10 +104,10 @@ class base_vel_sub_pub_node(Node):
         # last entry corresponds to the current angular velocity
         return list(omega[-1])
 
-        return 2 * q2 * q1**(-1) / dt
-
-    def linear_velocity(self, current_pose: PoseStamped, previous_pose:PoseStamped, dt: float):
-        
+    def linear_velocity(self, previous_pose: PoseStamped, current_pose: PoseStamped, dt: float) -> List[float]:
+        """
+        Computes linear 
+        """
         if not dt > 0:  
             return [0.0, 0.0, 0.0]  
         
@@ -127,7 +136,7 @@ class base_vel_sub_pub_node(Node):
 def main(args=None):
     rclpy.init(args=args)
 
-    node = base_vel_sub_pub_node(tf_name="mocap4gripper2_straight/pose")
+    node = mocap_base_vel_node(tf_name="mocap4gripper2_straight/pose")
 
     try:
         rclpy.spin(node)

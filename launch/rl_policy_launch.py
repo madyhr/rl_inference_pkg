@@ -6,7 +6,7 @@ from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
 
-    pkg_name = 'arise'
+    pkg_name = 'rl_inference_pkg'
 
     teleop_node = Node(
         package = 'teleop_twist_keyboard',
@@ -16,17 +16,17 @@ def generate_launch_description():
 
     base_velocity_node = Node(
         package = pkg_name,
-        executable = 'base_velocity_node.py',
+        executable = 'mocap_base_vel_node',
         output = 'screen',
     )
 
     rl_policy_node = Node(
         package = pkg_name,
-        executable = 'rl_policy_node.py'
+        executable = 'rl_policy_node'
     )
 
     return LaunchDescription([
-        teleop_node,
+        # teleop_node,
         base_velocity_node,
         rl_policy_node
     ])
