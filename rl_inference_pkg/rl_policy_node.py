@@ -8,7 +8,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.executors import ExternalShutdownException
 from rclpy.exceptions import ROSInterruptException
-from geometry_msgs.msg import Twist, TFStamped
+from geometry_msgs.msg import Twist, TransformStamped
 from motion_stack.core.utils.joint_state import JState
 from motion_stack.api.ros2.joint_api import JointHandler
 from motion_stack.ros2.utils.conversion import ros_to_time
@@ -31,7 +31,7 @@ class RlPolicyNode(Node):
             10)
         
         self.base_vel_subscriber_  = self.create_subscription(
-            TFStamped, 
+            TransformStamped, 
             f'/{base_name}_base_vel', 
             self.base_vel_listener_callback, 
             10)
@@ -80,10 +80,10 @@ class RlPolicyNode(Node):
         self.base_velocity = [msg.transform.translation.x,
                               msg.transform.translation.y,
                               msg.transform.translation.z, 
+                              msg.transform.rotation.w,
                               msg.transform.rotation.x,
                               msg.transform.rotation.y,
-                              msg.transform.rotation.z,
-                              msg.transform.rotation.w]
+                              msg.transform.rotation.z]
 
     def send_action(self, action):
         
@@ -103,17 +103,17 @@ class RlPolicyNode(Node):
         self.leg.send(leg_cmd)
 
         # keep joints outside action space still
-        leg_js_dict = {js.name: js.position for js in self.leg.states}
+        leg_js_dict = {js.name: js.position for js in self.leg.states.items()}
         leg_no_cmd = [JState(name=self.JOINT_STILL[i], time=ros_now, position = leg_js_dict[self.JOINT_STILL[i]]) for i in range(len(self.JOINT_STILL))]
         self.leg.send(leg_no_cmd)
 
     def get_states_pos(self) -> Dict[str, JState]:
         out = {}
-        out.update(self.front_wheel.states)
-        out.update(self.rear_wheel.states)
-        out.update(self.leg.states)
+        out.update({v.name:v for v in self.front_wheel.states.items()})
+        out.update({v.name:v for v in self.rear_wheel.states.items()})
+        out.update({v.name:v for v in self.leg.states.items()})
         return copy.deepcopy(out)
-        
+
     def timer_callback(self):
 
         states = self.get_states_pos()

@@ -2,7 +2,7 @@ from typing import List
 
 import numpy as np
 import torch
-import quaternion as qt
+import quaternion
 class HeroVehiclePolicy(object):
     """The Hero Vehicle running a Locomotion Policy"""
 
@@ -48,8 +48,14 @@ class HeroVehiclePolicy(object):
         
 
         lin_vel = base_velocity[:3]
-        ang_vel = qt.as_euler_angles(base_velocity[3:7])
-        
+
+        # cursed transformation from quaternion to euler angles (eww)
+        # ang_vel = quaternion.as_euler_angles(
+        #     quaternion.as_quat_array(base_velocity[3:7])
+        # )
+
+        ang_vel = base_velocity[3:6]
+
         obs = np.zeros(36)
         # Base lin vel
         obs[:3] = lin_vel

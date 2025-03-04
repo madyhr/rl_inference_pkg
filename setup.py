@@ -20,6 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            f"mocap_vel_node = {package_name}.base_velocity_node:main"
         ],
     },
 )
