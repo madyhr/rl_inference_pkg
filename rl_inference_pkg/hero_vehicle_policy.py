@@ -11,13 +11,13 @@ class HeroVehiclePolicy(object):
 
     def __init__(
         self,
-        policy_file = None,
+        policy_path: str = None,
     ) -> None:
         policy_path = self.load_policy_path()
         self.policy = torch.jit.load(policy_path)
-        self._pos_action_scale = 0.5
-        self._vel_action_scale = 5.0
-        self._previous_action = np.zeros(9)
+        self._pos_action_scale: float = 0.5
+        self._vel_action_scale: float = 5.0
+        self._previous_action: np.ndarray = np.zeros(9)
 
     def load_policy_path(self):
         """
@@ -69,6 +69,20 @@ class HeroVehiclePolicy(object):
         np.ndarray -- The observation vector.
 
         """
+
+        # offset difference between URDFs of simulated and real vehicle
+        joint_pos_offset = np.array([
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.57078,
+            0.0,
+            0.0
+        ])
+
         lin_vel = base_velocity[:3]
         ang_vel = base_velocity[3:6]
 
@@ -78,7 +92,7 @@ class HeroVehiclePolicy(object):
         # Base ang vel
         obs[3:6] = ang_vel
         # Joint states
-        obs[6:15] = joint_positions
+        obs[6:15] = joint_positions - joint_pos_offset
         obs[15:24] = joint_velocities
         # Command
         obs[24:27] = command

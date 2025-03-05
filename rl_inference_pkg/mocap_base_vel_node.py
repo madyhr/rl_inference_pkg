@@ -41,6 +41,8 @@ class mocap_base_vel_node(Node):
         while self.data is None and rclpy.ok():
             rclpy.spin_once(self, timeout_sec=0.1)
 
+        self.base_lin_vel = [0.0, 0.0, 0.0]
+        self.base_ang_vel = [0.0, 0.0, 0.0]
         self.previous_pose: PoseStamped = self.data
         self.get_logger().info("Received first pose message, initialization complete.")
         
@@ -69,9 +71,6 @@ class mocap_base_vel_node(Node):
     def time_difference(self, previous_pose: PoseStamped, current_pose: PoseStamped) -> float:
         """
         Computes time difference in seconds between current pose and previous pose.
-
-        Returns:
-        float -- time difference
         """
         t1 = Time.from_msg(previous_pose.header.stamp)
         t2 = Time.from_msg(current_pose.header.stamp)
@@ -85,7 +84,7 @@ class mocap_base_vel_node(Node):
         Careful: numpy-quaternion uses (w,x,y,z) format while ROS2 uses (x,y,z,w) format. 
 
         Returns:
-        List[float] -- angular velocities
+        List[float] -- angular velocities [w_x, w_y, w_z]
         """ 
         if not dt > 0:
             return [0.0, 0.0, 0.0]
