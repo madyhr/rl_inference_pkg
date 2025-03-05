@@ -18,28 +18,13 @@ from motion_stack.ros2.utils.conversion import ros_to_time
 
 from rl_inference_pkg.hero_vehicle_policy import HeroVehiclePolicy
 
-class RlPolicyNode(Node):
+class TestRlPolicyNode(Node):
     '''
-    Subscribes to the topics containing observation data and sends corresponding actions through Motion Stack API.
-    Uses the pre-trained policy given by self.policy to convert these observations to actions. 
+    For testing output e
     '''
 
-    def __init__(self, policy_path: str, limbs: List[int]):
-        super().__init__("rl_policy")
-
-        self.cmd_vel_subscriber_  = self.create_subscription(
-            Twist, 
-            '/cmd_vel', 
-            self.cmd_vel_listener_callback, 
-            10
-        )
-        
-        self.base_vel_subscriber_  = self.create_subscription(
-            TwistStamped, 
-            '/rl_base_vel', 
-            self.base_vel_listener_callback, 
-            10
-        )
+    def __init__(self, policy_path: str, limbs: List[int], base_name: str):
+        super().__init__("test_rl_policy")
 
         self.policy = HeroVehiclePolicy(policy_path=policy_path)
         self.front_wheel = JointHandler(self, limbs[0])
@@ -47,11 +32,11 @@ class RlPolicyNode(Node):
         self.leg = JointHandler(self, limbs[2])
 
         self.base_velocity: List[float] = [0.0] * 6
-        self.command: List[float] = [0.0] * 3
+        self.command: List[float] = [0.12, 0.0, 0.0]
 
         # max cmd vel in m/s and rad/s
-        self.CMD_LIN_VEL_MAX = 0.12
-        self.CMD_ANG_VEL_MAX = 0.25
+        self.CMD_LIN_VEL_MAX: float = 0.12
+        self.CMD_ANG_VEL_MAX: float = 0.25
 
         # ordered joint names for vehicle mode policy
         self.JOINT_ORDER: List[str] = [
@@ -71,25 +56,9 @@ class RlPolicyNode(Node):
             f"leg{limbs[2]}joint5",
         ]
 
-        self.timer = self.create_timer(0.02,self.timer_callback) # 200 Hz
+        self.action_flag: bool = False
 
-    def cmd_vel_listener_callback(self, msg: Twist):
-        # vel command only has 3 dims, x, y and rz. 
-        self.command = [
-            np.clip(msg.linear.x, -self.CMD_LIN_VEL_MAX, self.CMD_LIN_VEL_MAX),
-            np.clip(msg.linear.y, -self.CMD_LIN_VEL_MAX, self.CMD_LIN_VEL_MAX), 
-            np.clip(msg.angular.z, -self.CMD_ANG_VEL_MAX, self.CMD_ANG_VEL_MAX)
-        ]
-
-    def base_vel_listener_callback(self, msg:TwistStamped):
-        self.base_velocity = [
-            msg.twist.linear.x,
-            msg.twist.linear.y,
-            msg.twist.linear.z,
-            msg.twist.angular.x,
-            msg.twist.angular.y,
-            msg.twist.angular.z
-        ]
+        self.timer = self.create_timer(0.02,self.timer_callback) # 50 Hz
 
     def send_action(self, action: List[float]):
         
@@ -116,7 +85,7 @@ class RlPolicyNode(Node):
         leg_no_cmd = [JState(name=name, time=ros_now, position=leg_js_dict[name]) for name in self.JOINT_STILL]
         self.leg.send(leg_no_cmd)
 
-        # self.get_logger().info("Action successfully sent.")
+        self.get_logger().info("Action successfully sent.")
 
     def get_states_pos(self) -> Dict[str, JState]:
         out = {}
@@ -137,11 +106,9 @@ class RlPolicyNode(Node):
 
         useful_states = [states.get(k) for k in self.JOINT_ORDER]
         
-        # make sure all joints actually give *any* data other than None
         if None in useful_states:
             return
         
-        # velocity may be None if no velocity command has been given 
         joint_pos = [v.position for v in useful_states]
         joint_vel = [v.velocity if v.velocity is not None else 0.0 for v in useful_states]
 
@@ -152,11 +119,17 @@ class RlPolicyNode(Node):
             command = np.array(self.command),
         )
 
+        
+
         action = self.policy.get_action(obs)
+        if self.action_flag == False:
+            self.get_logger().info(f"Observation that was received: {obs}")
+            self.get_logger().info(f"Action being sent: {type(action[0])}, {action[0]}")
+            self.action_flag = True
+            
+        
 
-        # self.get_logger().info(f"Action being sent: {action}")
-
-        self.send_action(action)
+        # self.send_action(action)
 
 def main(args=None):
     rclpy.init(args=args)
@@ -165,9 +138,9 @@ def main(args=None):
     policy_path = "/home/madyhr/Motion-Stack/src/rl_inference_pkg/policy/policy.pt"
     
     # limb numbers/id in order (front wheel, back wheel, bridge leg)
-    limbs = [12, 14, 1]
+    limbs = [11, 12, 1]
     base_name = "leg1link4"
-    node = RlPolicyNode(policy_path, limbs)
+    node = TestRlPolicyNode(policy_path, limbs, base_name)
 
     try:
         rclpy.spin(node)

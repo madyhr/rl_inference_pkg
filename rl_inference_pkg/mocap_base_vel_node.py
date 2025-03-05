@@ -135,7 +135,7 @@ class mocap_base_vel_node(Node):
 def main(args=None):
     rclpy.init(args=args)
 
-    node = mocap_base_vel_node(tf_name="mocap4gripper2_straight/pose")
+    node = mocap_base_vel_node(tf_name="mocapVehicle/pose")
 
     try:
         rclpy.spin(node)
