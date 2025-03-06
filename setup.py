@@ -12,7 +12,7 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        (f"share/{package_name}/launch", glob("policy/*", recursive=True)),
+        (f"share/{package_name}/launch", glob("launch/*", recursive=True)),
         (f"share/{package_name}/policy", glob("policy/*", recursive=True)),
         (f"share/{package_name}/urdf", glob("urdf/*", recursive=True)),
         (f"share/{package_name}/meshes", glob("meshes/*", recursive=True)), 

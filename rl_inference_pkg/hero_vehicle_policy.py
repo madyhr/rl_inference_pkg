@@ -13,7 +13,7 @@ class HeroVehiclePolicy(object):
         self,
         policy_path: str = None,
     ) -> None:
-        policy_path = self.load_policy_path()
+        # policy_path = self.load_policy_path()
         self.policy = torch.jit.load(policy_path)
         self._pos_action_scale: float = 0.5
         self._vel_action_scale: float = 5.0

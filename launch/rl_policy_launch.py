@@ -27,6 +27,6 @@ def generate_launch_description():
 
     return LaunchDescription([
         # teleop_node,
-        base_velocity_node,
+        # base_velocity_node,
         rl_policy_node
     ])

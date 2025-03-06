@@ -12,11 +12,16 @@ from rclpy.node import Node
 from rclpy.executors import ExternalShutdownException
 from rclpy.exceptions import ROSInterruptException
 from geometry_msgs.msg import Twist, TwistStamped
+from keyboard_msgs.msg import Key
 from motion_stack.core.utils.joint_state import JState
-from motion_stack.api.ros2.joint_api import JointHandler
+from motion_stack.api.ros2.joint_api import JointHandler, JointSyncerRos
 from motion_stack.ros2.utils.conversion import ros_to_time
 
 from rl_inference_pkg.hero_vehicle_policy import HeroVehiclePolicy
+
+# Operator specific namespace for keyboard control
+operator = str(os.environ.get("OPERATOR"))
+INPUT_NAMESPACE = f"/{operator}"
 
 class RlPolicyNode(Node):
     '''
@@ -26,6 +31,10 @@ class RlPolicyNode(Node):
 
     def __init__(self, policy_path: str, limbs: List[int]):
         super().__init__("rl_policy")
+
+        ##
+        # Subscribers
+        ##
 
         self.cmd_vel_subscriber_  = self.create_subscription(
             Twist, 
@@ -41,15 +50,36 @@ class RlPolicyNode(Node):
             10
         )
 
-        self.policy = HeroVehiclePolicy(policy_path=policy_path)
-        self.front_wheel = JointHandler(self, limbs[0])
-        self.rear_wheel = JointHandler(self, limbs[1])
-        self.leg = JointHandler(self, limbs[2])
+        self.key_press_subscriber_ = self.create_subscription(
+            Key, 
+            f"{INPUT_NAMESPACE}/keydown", 
+            self.key_press_listener_callback, 
+            10
+        )
 
+        ##
+        # Policy specific
+        ##
+
+        self.policy = HeroVehiclePolicy(policy_path=policy_path)
         self.base_velocity: List[float] = [0.0] * 6
         self.command: List[float] = [0.0] * 3
 
-        # max cmd vel in m/s and rad/s
+        ## 
+        # Motion Stack joint interface
+        ##
+        
+        self.front_wheel: JointHandler = JointHandler(self, limbs[0])
+        self.rear_wheel: JointHandler = JointHandler(self, limbs[1])
+        self.leg: JointHandler = JointHandler(self, limbs[2])
+        # joint syncer to use safe trajectories
+        self.leg_sync: JointSyncerRos = JointSyncerRos([self.leg])
+
+        ##
+        # Params
+        ##
+
+        # max cmd vel in m/s and rad/s, based on RL training and hardware
         self.CMD_LIN_VEL_MAX = 0.12
         self.CMD_ANG_VEL_MAX = 0.25
 
@@ -71,7 +101,43 @@ class RlPolicyNode(Node):
             f"leg{limbs[2]}joint5",
         ]
 
-        self.timer = self.create_timer(0.02,self.timer_callback) # 200 Hz
+        ##
+        # Flags
+        ##
+
+        self.inference_flag: bool = False
+        self.limb_futures = self.limb_setup()
+        self.limbs_ready: bool = False
+        ##
+        # Timer
+        ##
+
+        self.timer = self.create_timer(0.02,self.timer_callback) # 50 Hz
+        
+    def limb_setup(self):
+        
+        self.get_logger().info(f"Trying to setup the following joints: {self.JOINT_ORDER}")
+
+        front_wheel_setup = self.front_wheel.ready_up(set(self.JOINT_ORDER[0:2]))
+        rear_wheel_setup = self.rear_wheel.ready_up(set(self.JOINT_ORDER[2:4]))
+        leg_setup = self.leg.ready_up(set(self.JOINT_ORDER[4:9]))
+
+        return [front_wheel_setup, rear_wheel_setup, leg_setup]
+    
+    def check_limb_ready(self):
+        
+        # shortcut
+        if self.limbs_ready:
+            return
+        
+        # all limbs should be ready 
+        if sum(future[0].done() for future in self.limb_futures) != len(self.limb_futures):
+            return
+        
+        self.get_logger().info(f"All limbs are ready.")
+        self.limbs_ready = True
+
+        pass
 
     def cmd_vel_listener_callback(self, msg: Twist):
         # vel command only has 3 dims, x, y and rz. 
@@ -91,54 +157,74 @@ class RlPolicyNode(Node):
             msg.twist.angular.z
         ]
 
+    def key_press_listener_callback(self, msg: Key):
+        key_code = msg.code
+        key_modifier = msg.modifiers
+
+        if key_code == Key.KEY_R:
+            self.get_logger().info("'R' received: Inference has BEGUN.")
+            self.inference_flag = True
+
+        if key_code == Key.KEY_S:
+            self.get_logger().info("'S' received: Inference has STOPPED.")
+            self.stop_wheels()
+            self.inference_flag = False
+
+    def stop_wheels(self):
+        # send a zero velocity command to all 4 wheels
+        ros_now = ros_to_time(self.get_clock().now())
+        front_wheel_cmd = {self.JOINT_ORDER[i]: 0.0 for i in range(0, 2)}
+        rear_wheel_cmd = {self.JOINT_ORDER[i]: 0.0 for i in range(2, 4)}
+
+        self.front_wheel.send([JState(name=name, time=ros_now, velocity=value) for name, value in front_wheel_cmd.items()])
+        self.rear_wheel.send([JState(name=name, time=ros_now, velocity=value) for name, value in rear_wheel_cmd.items()])
+
     def send_action(self, action: List[float]):
         
-        # check all joints' Future if they are ready. 
-        if not (self.front_wheel.ready.done() and self.rear_wheel.ready.done() and self.leg.ready.done()):
-            self.get_logger().info("No actions were sent.")
-            return
-        ##
-        # add check if velocity is prrrrrrrrrrrrrrrroperly sent without the position
-        ##
         ros_now = ros_to_time(self.get_clock().now())
         front_wheel_cmd = {self.JOINT_ORDER[i]: action[i] for i in range(0, 2)}
         rear_wheel_cmd = {self.JOINT_ORDER[i]: action[i] for i in range(2, 4)}
         leg_cmd = {self.JOINT_ORDER[i]: action[i] for i in range(4, 9)}
 
+        # add offset back
+        leg_cmd["leg1joint4"] += 1.57075
+
         # send the commands using the dictionary
         self.front_wheel.send([JState(name=name, time=ros_now, velocity=value) for name, value in front_wheel_cmd.items()])
         self.rear_wheel.send([JState(name=name, time=ros_now, velocity=value) for name, value in rear_wheel_cmd.items()])
-        self.leg.send([JState(name=name, time=ros_now, position=value) for name, value in leg_cmd.items()])
-
         # keep joints outside action space still
-        # leg_js_dict = {js.name: js.position for js in self.leg.states.items()}
-        leg_js_dict = {js.name: js.position for js in self.leg.states}
-        leg_no_cmd = [JState(name=name, time=ros_now, position=leg_js_dict[name]) for name in self.JOINT_STILL]
-        self.leg.send(leg_no_cmd)
+        leg_no_cmd = {js.name: js.position for js in self.leg.states if js in self.JOINT_STILL}
+        
+        self.leg_sync.lerp(leg_cmd | leg_no_cmd)
 
         # self.get_logger().info("Action successfully sent.")
 
-    def get_states_pos(self) -> Dict[str, JState]:
+    def get_states(self) -> Dict[str, JState]:
         out = {}
-        # out.update({v.name:v for v in self.front_wheel.states.items()})
-        # out.update({v.name:v for v in self.rear_wheel.states.items()})
-        # out.update({v.name:v for v in self.leg.states.items()})
         out.update({v.name:v for v in self.front_wheel.states})
         out.update({v.name:v for v in self.rear_wheel.states})
         out.update({v.name:v for v in self.leg.states})
         return copy.deepcopy(out)
 
     def timer_callback(self):
+        
+        self.check_limb_ready()
+        
+        if not self.limbs_ready:
+            return
+
+        if not self.inference_flag:
+            return
 
         # self.get_logger().info(f"Command: {self.command}")
         # self.get_logger().info(f"Base velocity: {self.base_velocity}")
 
-        states = self.get_states_pos()
-
-        useful_states = [states.get(k) for k in self.JOINT_ORDER]
+        states = self.get_states()
         
-        # make sure all joints actually give *any* data other than None
+        useful_states = [states.get(k) for k in self.JOINT_ORDER]
+
         if None in useful_states:
+            self.get_logger().info(f"None in useful states")
             return
         
         # velocity may be None if no velocity command has been given 
@@ -154,9 +240,12 @@ class RlPolicyNode(Node):
 
         action = self.policy.get_action(obs)
 
-        # self.get_logger().info(f"Action being sent: {action}")
+        self.get_logger().info(f"Observation being received: {obs[15:24]}")
+        self.get_logger().info(f"Action being sent: {action}")
 
         self.send_action(action)
+
+        self.leg_sync.execute()
 
 def main(args=None):
     rclpy.init(args=args)
@@ -165,8 +254,7 @@ def main(args=None):
     policy_path = "/home/madyhr/Motion-Stack/src/rl_inference_pkg/policy/policy.pt"
     
     # limb numbers/id in order (front wheel, back wheel, bridge leg)
-    limbs = [12, 14, 1]
-    base_name = "leg1link4"
+    limbs = [11, 12, 1]
     node = RlPolicyNode(policy_path, limbs)
 
     try:
