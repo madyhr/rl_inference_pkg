@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict
 
 import numpy as np
 import torch
@@ -11,15 +11,19 @@ class HeroVehiclePolicy(object):
 
     def __init__(
         self,
-        policy_path: str = None,
+        policy_name: str = None,
+        joint_offset: np.ndarray = None
     ) -> None:
-        # policy_path = self.load_policy_path()
+        policy_path = self.load_policy_path(policy_name)
         self.policy = torch.jit.load(policy_path)
-        self._pos_action_scale: float = 0.5
-        self._vel_action_scale: float = 5.0
+        self.policy.eval()
+        self.joint_offset = joint_offset
+        self.POS_ACTION_SCALE: float = 0.5
+        self.VEL_ACTION_SCALE: float = 5.0
         self._previous_action: np.ndarray = np.zeros(9)
+        
 
-    def load_policy_path(self):
+    def load_policy_path(self, policy_name: str):
         """
         Loads the path to the policy.pt file within the 'my_package' package.
 
@@ -28,7 +32,7 @@ class HeroVehiclePolicy(object):
         """
         try:
             package_path = ament_index_python.packages.get_package_share_directory('rl_inference_pkg')
-            policy_path = os.path.join(package_path, 'policy', 'policy.pt')
+            policy_path = os.path.join(package_path, 'policy', f'{policy_name}')
 
             if os.path.exists(policy_path):
                 return policy_path
@@ -44,7 +48,8 @@ class HeroVehiclePolicy(object):
                             base_velocity: np.ndarray, 
                             joint_positions: np.ndarray, 
                             joint_velocities: np.ndarray, 
-                            command: np.ndarray) -> np.ndarray:
+                            command: np.ndarray
+                            ) -> np.ndarray:
         """
         Compose the observation vector for the policy.
         
@@ -69,20 +74,7 @@ class HeroVehiclePolicy(object):
         np.ndarray -- The observation vector.
 
         """
-
-        # offset difference between URDFs of simulated and real vehicle
-        joint_pos_offset = np.array([
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            1.57078,
-            0.0,
-            0.0
-        ])
-
+        
         lin_vel = base_velocity[:3]
         ang_vel = base_velocity[3:6]
 
@@ -92,7 +84,7 @@ class HeroVehiclePolicy(object):
         # Base ang vel
         obs[3:6] = ang_vel
         # Joint states
-        obs[6:15] = joint_positions - joint_pos_offset
+        obs[6:15] = joint_positions - self.joint_offset
         obs[15:24] = joint_velocities
         # Command
         obs[24:27] = command
@@ -111,17 +103,17 @@ class HeroVehiclePolicy(object):
         Returns:
         action (np.ndarray, dim = 9) -- Action taken 
         """
-        with torch.no_grad():
+        with torch.inference_mode():
             obs = torch.from_numpy(obs).view(1, -1).float()
             action = self.policy(obs).detach().view(-1).numpy()
         self._previous_action = action
 
         scaled_action = [0] * len(action)
-        scaled_action[:4] = action[:4] * self._vel_action_scale
-        scaled_action[4:9] = action[4:9] * self._pos_action_scale
+        scaled_action[:4] = action[:4] * self.VEL_ACTION_SCALE
+        scaled_action[4:9] = action[4:9] * self.POS_ACTION_SCALE
 
         # apply offsets for real robot
-        scaled_action[6] = scaled_action[6] + 1.57075
+        scaled_action[6] = scaled_action[6] + self.joint_offset[6]
 
         return list(scaled_action)
 
