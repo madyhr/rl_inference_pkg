@@ -78,7 +78,7 @@ class mocap_base_vel_node(Node):
         dt: float = (t2 - t1).nanoseconds * 1e-9  
         return dt
 
-    def angular_velocity_quat(self, previous_pose: PoseStamped, current_pose: PoseStamped,dt: float) -> List[float]:
+    def angular_velocity_quat(self, previous_pose: PoseStamped, current_pose: PoseStamped, dt: float) -> List[float]:
         """
         Computes angular velocity given current pose, previous pose and time difference, dt.
         Careful: numpy-quaternion uses (w,x,y,z) format while ROS2 uses (x,y,z,w) format. 
@@ -105,7 +105,10 @@ class mocap_base_vel_node(Node):
 
     def linear_velocity(self, previous_pose: PoseStamped, current_pose: PoseStamped, dt: float) -> List[float]:
         """
-        Computes linear 
+        Computes linear velocity given current pose, previous pose and time difference, dt.
+
+        Returns:
+        List[float] -- linear velocities [v_x, v_y, v_z]
         """
         if not dt > 0:  
             return [0.0, 0.0, 0.0]  
@@ -129,8 +132,6 @@ class mocap_base_vel_node(Node):
         self.publish_base_vel()
 
         self.previous_pose = current_pose
-
-
 
 def main(args=None):
     rclpy.init(args=args)

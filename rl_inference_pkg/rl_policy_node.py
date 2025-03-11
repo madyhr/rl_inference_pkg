@@ -66,7 +66,7 @@ class RlPolicyNode(Node):
         self.rear_wheel: JointHandler = JointHandler(self, limbs[1])
         self.leg: JointHandler = JointHandler(self, limbs[2])
         # joint syncer to use safe trajectories
-        self.leg_sync: JointSyncerRos = JointSyncerRos([self.leg])
+        # self.leg_sync: JointSyncerRos = JointSyncerRos([self.leg])
 
         ##
         # Params
@@ -89,11 +89,7 @@ class RlPolicyNode(Node):
         ]
 
         self.LEG_JOINTS: List[str] = [
-            f"leg{limbs[2]}joint1",
-            f"leg{limbs[2]}joint2",
-            f"leg{limbs[2]}joint4",
-            f"leg{limbs[2]}joint6",
-            f"leg{limbs[2]}joint7",
+
         ]
 
         self.JOINT_ORDER: List[str] = self.FRONT_WHEEL_JOINTS + self.REAR_WHEEL_JOINTS + self.LEG_JOINTS
@@ -102,12 +98,17 @@ class RlPolicyNode(Node):
         self.JOINT_OFFSET_DICT: Dict[str, float] = dict(zip(self.JOINT_ORDER, [0.0]*len(self.JOINT_ORDER)))
 
         # specify offsets here
-        self.JOINT_OFFSET_DICT[f"leg{limbs[2]}joint4"] = 1.57078
+        # self.JOINT_OFFSET_DICT[f"leg{limbs[2]}joint4"] = 1.57078
 
         self.JOINT_OFFSET = dict_to_array(self.JOINT_OFFSET_DICT,self.JOINT_ORDER)
 
         # joints to keep still (i.e. they are outside action space), order does not matter
         self.JOINT_STILL = [
+            f"leg{limbs[2]}joint1",
+            f"leg{limbs[2]}joint7",
+            f"leg{limbs[2]}joint2",
+            f"leg{limbs[2]}joint4",
+            f"leg{limbs[2]}joint6",
             f"leg{limbs[2]}joint3",
             f"leg{limbs[2]}joint5",
         ]
@@ -131,24 +132,32 @@ class RlPolicyNode(Node):
         self.base_velocity: List[float] = [0.0] * 6
         self.command: List[float] = [0.0] * 3
 
+        self.policy.prepare_observation_dims(
+            n_pos=len(self.LEG_JOINTS),
+            n_vel=len(self.FRONT_WHEEL_JOINTS + self.REAR_WHEEL_JOINTS),
+            cmd_dim=len(self.command),
+            base_vel_dim=len(self.base_velocity)
+        )
+
         ##
         # Timer
         ##
 
-        self.timer = self.create_timer(0.02,self.timer_callback) # 50 Hz
+        self.timer = self.create_timer(0.02, self.timer_callback) # 50 Hz
         
     def limb_setup(self):
-        
+        """Initiates the limb setup procedure in Motion Stack API and returns list of Future's for the limbs."""
         self.get_logger().info(f"Trying to setup the following joints: {self.JOINT_ORDER}")
 
-        front_wheel_setup = self.front_wheel.ready_up(set(self.JOINT_ORDER[0:2]))
-        rear_wheel_setup = self.rear_wheel.ready_up(set(self.JOINT_ORDER[2:4]))
-        leg_setup = self.leg.ready_up(set(self.JOINT_ORDER[4:9]))
+        front_wheel_setup = self.front_wheel.ready_up(set(self.FRONT_WHEEL_JOINTS))
+        rear_wheel_setup = self.rear_wheel.ready_up(set(self.REAR_WHEEL_JOINTS))
+        leg_setup = self.leg.ready_up(set(self.LEG_JOINTS))
 
         return [front_wheel_setup, rear_wheel_setup, leg_setup]
     
     def check_limb_ready(self):
-        
+        """Checks if all limbs on the robot are ready. 
+        If yes, then sets the limbs_ready flag to True and allows for policy inference."""
         # shortcut
         if self.limbs_ready:
             return
@@ -157,9 +166,10 @@ class RlPolicyNode(Node):
         if sum(future[0].done() for future in self.limb_futures) != len(self.limb_futures):
             return
         
-        self.get_logger().info(f"All limbs are ready.")
+        # self.get_logger().info(f"All limbs are ready.")
         self.limbs_ready = True
-        self.get_logger().info(f"NOTE: Begin inference by pressing 'R' and stop by pressing 'S'.")
+        self.get_logger().info(f"Setup successful. RL Inference is ready.")
+        self.get_logger().info(f"Begin inference by pressing 'R' and stop by pressing 'S'.")
         pass
 
     def cmd_vel_listener_callback(self, msg: Twist):
@@ -226,7 +236,6 @@ class RlPolicyNode(Node):
         front_wheel_action = {joint: joint_actions[joint] for joint in self.FRONT_WHEEL_JOINTS}
         rear_wheel_action = {joint: joint_actions[joint] for joint in self.REAR_WHEEL_JOINTS}
         leg_action = {joint: joint_actions[joint] for joint in self.LEG_JOINTS}
-
         # send the commands using the dictionaries
         self.send_jstate(self.front_wheel, front_wheel_action, action_type="velocity")
         self.send_jstate(self.rear_wheel, rear_wheel_action, action_type="velocity")
@@ -234,8 +243,8 @@ class RlPolicyNode(Node):
         # keep joints outside action space still
         leg_no_action = {js.name: js.position for js in self.leg.states if js in self.JOINT_STILL}
 
-        self.leg_sync.lerp(leg_action | leg_no_action)
-
+        # self.leg_sync.lerp(leg_action | leg_no_action)
+        # TODO: check for: SensorSyncWarning: Syncer is out of sync with sensor data. Call `syncer.clear()` to reset the syncer onto the sensor position.
         # self.get_logger().info("Action successfully sent.")
 
     def get_states(self) -> Dict[str, JState]:
@@ -263,7 +272,7 @@ class RlPolicyNode(Node):
         useful_states = [states.get(k) for k in self.JOINT_ORDER]
 
         if None in useful_states:
-            self.get_logger().info(f"None in useful states")
+            self.get_logger().info(f"'None' in useful states")
             return
         
         # velocity may be None if no velocity command has been given 
@@ -271,10 +280,10 @@ class RlPolicyNode(Node):
         joint_vel = [v.velocity if v.velocity is not None else 0.0 for v in useful_states]
 
         obs = self.policy.compose_observation(
-            base_velocity=np.array(self.base_velocity),
             joint_positions=np.array(joint_pos),
             joint_velocities=np.array(joint_vel),
             command = np.array(self.command),
+            # base_velocity=np.array(self.base_velocity),
         )
 
         action = self.policy.get_action(obs)
@@ -284,13 +293,13 @@ class RlPolicyNode(Node):
 
         self.send_action(action)
         # Step the Motion Stack JointSyncer
-        self.leg_sync.execute()
+        # self.leg_sync.execute()
 
 def main(args=None):
     rclpy.init(args=args)
 
-    # pretrained RL policy
-    policy_name = "policy.pt"
+    # pretrained RL policy found in pkg/policy/ directory
+    policy_name = "20250310_wheels_policy.pt"
     
     # limb numbers/id in order (front wheel, back wheel, bridge leg)
     limbs = [11, 12, 1]
