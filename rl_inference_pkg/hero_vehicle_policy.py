@@ -144,7 +144,7 @@ class HeroVehiclePolicy(object):
         # scale position and velocity actions according to their scales defined during training
         scaled_action = [0.0] * len(action)
         scaled_action[:n_v] = action[:n_v] * self.VEL_ACTION_SCALE
-        # scaled_action[n_v:n_v+n_p] = action[n_v:n_v+n_p]  * self.POS_ACTION_SCALE
+        scaled_action[n_v:n_v+n_p] = action[n_v:n_v+n_p]  * self.POS_ACTION_SCALE
 
         return list(scaled_action)
 

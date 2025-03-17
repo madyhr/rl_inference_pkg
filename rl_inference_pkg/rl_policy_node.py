@@ -76,7 +76,7 @@ class RlPolicyNode(Node):
         self.CMD_LIN_VEL_MAX = 0.12
         self.CMD_ANG_VEL_MAX = 0.25
 
-        # ordered joint names for vehicle mode policy
+        # *ordered* joint names for vehicle mode policy
 
         self.FRONT_WHEEL_JOINTS: List[str] = [
             f"wheel{limbs[0]}_left_joint",
@@ -89,7 +89,6 @@ class RlPolicyNode(Node):
         ]
 
         self.LEG_JOINTS: List[str] = [
-
         ]
 
         self.JOINT_ORDER: List[str] = self.FRONT_WHEEL_JOINTS + self.REAR_WHEEL_JOINTS + self.LEG_JOINTS
@@ -102,13 +101,13 @@ class RlPolicyNode(Node):
 
         self.JOINT_OFFSET = dict_to_array(self.JOINT_OFFSET_DICT,self.JOINT_ORDER)
 
-        # joints to keep still (i.e. they are outside action space), order does not matter
+        # joints to keep still (i.e. they are outside action space), order does not matter here
         self.JOINT_STILL = [
             f"leg{limbs[2]}joint1",
-            f"leg{limbs[2]}joint7",
             f"leg{limbs[2]}joint2",
-            f"leg{limbs[2]}joint4",
             f"leg{limbs[2]}joint6",
+            f"leg{limbs[2]}joint7",
+            f"leg{limbs[2]}joint4",
             f"leg{limbs[2]}joint3",
             f"leg{limbs[2]}joint5",
         ]
@@ -211,10 +210,10 @@ class RlPolicyNode(Node):
         if action_type == "velocity":
             joint_handler.send([JState(name=name, time=ros_now, velocity=value) for name, value in action_dict.items()])
         elif action_type == "position":
-            # THIS CAN BE VERY UNSAFE. DO NOT USE UNLESS YOU KNOW WHAT YOU ARE DOING. USE JointSyncerRos() INSTEAD.
+            # THIS CAN BE VERY UNSAFE. DO NOT USE UNLESS YOU KNOW WHAT YOU ARE DOING. USE 'JointSyncerRos()' INSTEAD.
             joint_handler.send([JState(name=name, time=ros_now, position=value) for name, value in action_dict.items()])
         else:
-            print("Command type was not recognized. Use either 'velocity' or 'position'. ")
+            print("Action type was not recognized. Use either 'velocity' or 'position'. ")
             return 
 
     def stop_wheels(self):
@@ -242,7 +241,8 @@ class RlPolicyNode(Node):
 
         # keep joints outside action space still
         leg_no_action = {js.name: js.position for js in self.leg.states if js in self.JOINT_STILL}
-
+        self.send_jstate(self.leg, leg_action, action_type="position")
+        self.send_jstate(self.leg, leg_no_action, action_type="position")
         # self.leg_sync.lerp(leg_action | leg_no_action)
         # TODO: check for: SensorSyncWarning: Syncer is out of sync with sensor data. Call `syncer.clear()` to reset the syncer onto the sensor position.
         # self.get_logger().info("Action successfully sent.")
