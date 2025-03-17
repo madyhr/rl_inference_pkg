@@ -1,21 +1,17 @@
 from typing import List, Dict, Optional
 
+import abc
 import numpy as np
 import torch
 import quaternion
 
 import os
 import ament_index_python.packages
-class HeroVehiclePolicy(object):
-    """ The Hero Vehicle running a Locomotion Policy
-    This policy class expects observations of the following type:
-    - joint states: position and velocity of all joints
-    - command: 3 dimensional velocity command (v_x, v_y, w_z)
-    - base velocity [Optional]: the velocity (v_x, v_y, v_z, w_x, w_y, w_z) of the robot base frame in the world frame 
 
-    Remember to call self.prepare_observation_dims() before calling any of the other functions.
+class BasePolicy(abc.ABC):
+    """ A base policy class defining methods and attributes independent of type. 
+    Should be inherited when creating new policies. 
     
-
     Args:
         policy_name: str -- name of the file containing the policy in the pkg/policy/ directory
         joint_offset: np.ndarray -- array of joint offsets 
@@ -30,9 +26,9 @@ class HeroVehiclePolicy(object):
         self.policy = torch.jit.load(policy_path)
         self.policy.eval()
         self.joint_offset = joint_offset
-        self.POS_ACTION_SCALE: float = 0.5
-        self.VEL_ACTION_SCALE: float = 5.0
-        # self._previous_action: np.ndarray = np.zeros(9)
+        # Assume no scaling
+        self.POS_ACTION_SCALE: float = 1.0
+        self.VEL_ACTION_SCALE: float = 1.0
         self._previous_action: np.ndarray = np.zeros(len(joint_offset))
 
         self.num_pos_joints: int = 0
@@ -61,7 +57,7 @@ class HeroVehiclePolicy(object):
             print("Error: pkg not found.")
             return None
 
-    def prepare_observation_dims(self, n_pos, n_vel, cmd_dim, base_vel_dim):
+    def prepare_observation_dims(self, n_pos: int, n_vel: int, cmd_dim: int, base_vel_dim: int):
         """Specify dimensions of the different observations for internal use in compose_observation() and get_action().
         
         Args:
@@ -74,6 +70,44 @@ class HeroVehiclePolicy(object):
         self.num_vel_joints = n_vel
         self.cmd_dim = cmd_dim
         self.base_vel_dim = base_vel_dim
+
+    @abc.abstractmethod
+    def compose_observation(self):
+        """Subclasses must implement this method to define how observations are composed."""
+        pass
+
+    @abc.abstractmethod
+    def get_action(self, obs: np.ndarray) -> List[float]:
+        """Subclasses must implement this method to define how actions are generated."""
+        pass
+
+class HeroVehiclePolicy(BasePolicy):
+    """ The Hero Vehicle running a locomotion policy. This policy class expects observations of the following type:
+    - joint states: position and velocity of all joints
+    - command: 3 dimensional velocity command (v_x, v_y, w_z)
+    - base velocity [Optional]: the velocity (v_x, v_y, v_z, w_x, w_y, w_z) of the robot base frame in the world frame 
+
+    Remember to call self.prepare_observation_dims() before calling any of the other functions.
+    
+    Args:
+        policy_name: str -- name of the file containing the policy in the pkg/policy/ directory
+        joint_offset: np.ndarray -- array of joint offsets 
+    """
+
+    def __init__(
+        self,
+        policy_name: str = None,
+        joint_offset: np.ndarray = None
+    ) -> None:
+        super().__init__(policy_name, joint_offset)
+    
+        # scales defined during learning 
+        self.POS_ACTION_SCALE: float = 0.5
+        self.VEL_ACTION_SCALE: float = 5.0
+
+        # maximum command velocities given during training
+        self.CMD_LIN_VEL_MAX: float = 0.12
+        self.CMD_ANG_VEL_MAX: float = 0.25
 
     def compose_observation(self,  
                             joint_positions: np.ndarray, 
@@ -94,32 +128,24 @@ class HeroVehiclePolicy(object):
             obs (np.ndarray): The observation array.
 
         """
-        n_p = self.num_pos_joints
-        n_v = self.num_vel_joints
-        n = n_p + n_v
-        c = self.cmd_dim
-        b = self.base_vel_dim
+        obs_components = []
 
-        if base_velocity == None:
-            obs = np.zeros(3*n + c)
-            # Joint states
-            obs[:n] = joint_positions - self.joint_offset
-            obs[n:2*n] = joint_velocities
-            # Command
-            obs[2*n : 2*n+c] = command
-            # Previous Action
-            obs[2*n+c : 3*n+c] = self._previous_action
-        else: 
-            obs = np.zeros(3*n + c + b)
-            # Joint states
-            obs[:b] = base_velocity
-            obs[b:b+n] = joint_positions - self.joint_offset
-            obs[b+n:b+2*n] = joint_velocities
-            # Command
-            obs[b+2*n : b+2*n+c] = command
-            # Previous Action
-            obs[b+2*n+c : b+3*n+c] = self._previous_action
-        
+        # base velocity (if present)
+        if base_velocity is not None:
+            obs_components.append(base_velocity)
+
+        # joint states
+        obs_components.append(joint_positions - self.joint_offset)
+        obs_components.append(joint_velocities)
+
+        # command
+        obs_components.append(command)
+
+        # previous action
+        obs_components.append(self._previous_action)
+
+        obs = np.concatenate(obs_components)
+
         return obs
 
     def get_action(self, obs: np.ndarray) -> List[float]:
@@ -147,4 +173,3 @@ class HeroVehiclePolicy(object):
         scaled_action[n_v:n_v+n_p] = action[n_v:n_v+n_p]  * self.POS_ACTION_SCALE
 
         return list(scaled_action)
-

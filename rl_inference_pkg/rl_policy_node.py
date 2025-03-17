@@ -17,7 +17,7 @@ from motion_stack.core.utils.joint_state import JState
 from motion_stack.api.ros2.joint_api import JointHandler, JointSyncerRos
 from motion_stack.ros2.utils.conversion import ros_to_time
 
-from rl_inference_pkg.hero_vehicle_policy import HeroVehiclePolicy
+from rl_inference_pkg.policies import HeroVehiclePolicy
 from rl_inference_pkg.utils import dict_to_array
 
 # Operator specific namespace for ROS2 keyboard control
@@ -72,10 +72,6 @@ class RlPolicyNode(Node):
         # Params
         ##
 
-        # max cmd vel in m/s and rad/s, based on RL training and hardware
-        self.CMD_LIN_VEL_MAX = 0.12
-        self.CMD_ANG_VEL_MAX = 0.25
-
         # *ordered* joint names for vehicle mode policy
 
         self.FRONT_WHEEL_JOINTS: List[str] = [
@@ -128,6 +124,7 @@ class RlPolicyNode(Node):
             policy_name=policy_name, 
             joint_offset = self.JOINT_OFFSET
         )
+
         self.base_velocity: List[float] = [0.0] * 6
         self.command: List[float] = [0.0] * 3
 
@@ -137,6 +134,11 @@ class RlPolicyNode(Node):
             cmd_dim=len(self.command),
             base_vel_dim=len(self.base_velocity)
         )
+
+        # max cmd vel in m/s and rad/s, based on RL training and hardware
+        self.CMD_LIN_VEL_MAX = self.policy.CMD_LIN_VEL_MAX
+        self.CMD_ANG_VEL_MAX = self.policy.CMD_ANG_VEL_MAX
+
 
         ##
         # Timer
@@ -275,7 +277,7 @@ class RlPolicyNode(Node):
             self.get_logger().info(f"'None' in useful states")
             return
         
-        # velocity may be None if no velocity command has been given 
+        # velocity elements may be None if no velocity command has been given 
         joint_pos = [v.position for v in useful_states]
         joint_vel = [v.velocity if v.velocity is not None else 0.0 for v in useful_states]
 
@@ -292,7 +294,7 @@ class RlPolicyNode(Node):
         # self.get_logger().info(f"Action being sent: {action}")
 
         self.send_action(action)
-        # Step the Motion Stack JointSyncer
+        # step the Motion Stack JointSyncer
         # self.leg_sync.execute()
 
 def main(args=None):
@@ -302,7 +304,7 @@ def main(args=None):
     policy_name = "20250310_wheels_policy.pt"
     
     # limb numbers/id in order (front wheel, back wheel, bridge leg)
-    limbs = [11, 12, 1]
+    limbs = [12, 14, 1]
     node = RlPolicyNode(policy_name, limbs)
 
     try:
