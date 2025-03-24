@@ -18,7 +18,7 @@ from motion_stack.api.ros2.joint_api import JointHandler, JointSyncerRos
 from motion_stack.ros2.utils.conversion import ros_to_time
 
 from rl_inference_pkg.policies import HeroVehiclePolicy
-from rl_inference_pkg.utils import dict_to_array
+from rl_inference_pkg.utils import dict_to_array, wrap_to_pi
 
 # Operator specific namespace for ROS2 keyboard control
 operator = str(os.environ.get("OPERATOR"))
@@ -66,7 +66,7 @@ class RlPolicyNode(Node):
         self.rear_wheel: JointHandler = JointHandler(self, limbs[1])
         self.leg: JointHandler = JointHandler(self, limbs[2])
         # joint syncer to use safe trajectories
-        # self.leg_sync: JointSyncerRos = JointSyncerRos([self.leg])
+        self.leg_sync: JointSyncerRos = JointSyncerRos([self.leg])
 
         ##
         # Params
@@ -85,6 +85,8 @@ class RlPolicyNode(Node):
         ]
 
         self.LEG_JOINTS: List[str] = [
+            f"leg{limbs[2]}joint1",
+            f"leg{limbs[2]}joint7",
         ]
 
         self.JOINT_ORDER: List[str] = self.FRONT_WHEEL_JOINTS + self.REAR_WHEEL_JOINTS + self.LEG_JOINTS
@@ -99,10 +101,9 @@ class RlPolicyNode(Node):
 
         # joints to keep still (i.e. they are outside action space), order does not matter here
         self.JOINT_STILL = [
-            f"leg{limbs[2]}joint1",
+            
             f"leg{limbs[2]}joint2",
             f"leg{limbs[2]}joint6",
-            f"leg{limbs[2]}joint7",
             f"leg{limbs[2]}joint4",
             f"leg{limbs[2]}joint3",
             f"leg{limbs[2]}joint5",
@@ -139,7 +140,6 @@ class RlPolicyNode(Node):
         self.CMD_LIN_VEL_MAX = self.policy.CMD_LIN_VEL_MAX
         self.CMD_ANG_VEL_MAX = self.policy.CMD_ANG_VEL_MAX
 
-
         ##
         # Timer
         ##
@@ -154,7 +154,10 @@ class RlPolicyNode(Node):
         rear_wheel_setup = self.rear_wheel.ready_up(set(self.REAR_WHEEL_JOINTS))
         leg_setup = self.leg.ready_up(set(self.LEG_JOINTS))
 
-        return [front_wheel_setup, rear_wheel_setup, leg_setup]
+        return [front_wheel_setup, 
+                rear_wheel_setup, 
+                leg_setup
+                ]
     
     def check_limb_ready(self):
         """Checks if all limbs on the robot are ready. 
@@ -169,8 +172,8 @@ class RlPolicyNode(Node):
         
         # self.get_logger().info(f"All limbs are ready.")
         self.limbs_ready = True
-        self.get_logger().info(f"Setup successful. RL Inference is ready.")
-        self.get_logger().info(f"Begin inference by pressing 'R' and stop by pressing 'S'.")
+        self.get_logger().info(f"Test: Setup successful. RL Inference is ready.")
+        self.get_logger().info(f"Begin inference by pressing 'B' and halt by pressing 'H'.")
         pass
 
     def cmd_vel_listener_callback(self, msg: Twist):
@@ -195,12 +198,12 @@ class RlPolicyNode(Node):
         key_code = msg.code
         key_modifier = msg.modifiers
 
-        if key_code == Key.KEY_R:
-            self.get_logger().info("'R' received: Inference has BEGUN.")
+        if key_code == Key.KEY_B:
+            self.get_logger().info("'B' received: Inference has BEGUN.")
             self.inference_flag = True
 
-        if key_code == Key.KEY_S:
-            self.get_logger().info("'S' received: Inference has STOPPED.")
+        if key_code == Key.KEY_H:
+            self.get_logger().info("'H' received: Inference has HALTED.")
             self.stop_wheels()
             self.inference_flag = False
 
@@ -243,11 +246,12 @@ class RlPolicyNode(Node):
 
         # keep joints outside action space still
         leg_no_action = {js.name: js.position for js in self.leg.states if js in self.JOINT_STILL}
-        self.send_jstate(self.leg, leg_action, action_type="position")
-        self.send_jstate(self.leg, leg_no_action, action_type="position")
-        # self.leg_sync.lerp(leg_action | leg_no_action)
+        # self.send_jstate(self.leg, leg_action, action_type="position")
+        # self.send_jstate(self.leg, leg_no_action, action_type="position")
+        self.leg_sync.lerp(leg_action | leg_no_action)
         # TODO: check for: SensorSyncWarning: Syncer is out of sync with sensor data. Call `syncer.clear()` to reset the syncer onto the sensor position.
         # self.get_logger().info("Action successfully sent.")
+        # self.get_logger().info(f"Action being sent: {leg_action}")
 
     def get_states(self) -> Dict[str, JState]:
         out = {}
@@ -282,7 +286,7 @@ class RlPolicyNode(Node):
         joint_vel = [v.velocity if v.velocity is not None else 0.0 for v in useful_states]
 
         obs = self.policy.compose_observation(
-            joint_positions=np.array(joint_pos),
+            joint_positions=np.array(wrap_to_pi(joint_pos)),
             joint_velocities=np.array(joint_vel),
             command = np.array(self.command),
             # base_velocity=np.array(self.base_velocity),
@@ -290,18 +294,18 @@ class RlPolicyNode(Node):
 
         action = self.policy.get_action(obs)
 
-        # self.get_logger().info(f"Observation being received: {obs[15:24]}")
+        # self.get_logger().info(f"Observation being received: {obs[:12]}")
         # self.get_logger().info(f"Action being sent: {action}")
 
         self.send_action(action)
         # step the Motion Stack JointSyncer
-        # self.leg_sync.execute()
+        self.leg_sync.execute()
 
 def main(args=None):
     rclpy.init(args=args)
 
     # pretrained RL policy found in pkg/policy/ directory
-    policy_name = "20250310_wheels_policy.pt"
+    policy_name = "20250319_17_policy.pt"
     
     # limb numbers/id in order (front wheel, back wheel, bridge leg)
     limbs = [12, 14, 1]
@@ -312,6 +316,8 @@ def main(args=None):
     except (KeyboardInterrupt, ExternalShutdownException,ROSInterruptException):
         pass
     finally:
+        # if the node encounters error, stop wheels before suicide
+        node.stop_wheels()
         node.destroy_node()
         rclpy.shutdown()
 

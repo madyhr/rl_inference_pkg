@@ -1,3 +1,4 @@
+"""Policy Classes for RL inference"""
 from typing import List, Dict, Optional
 
 import abc
@@ -152,11 +153,11 @@ class HeroVehiclePolicy(BasePolicy):
         """
         Get action according to observation using model inference. Scale action according to action scales from learning env.
 
-        Argument:
-        obs (np.ndarray) -- Observations composed in the manner described in compose_observation().
+        Args:
+            obs (np.ndarray): Observations composed in the manner described in compose_observation().
 
         Returns:
-        action (np.ndarray) -- Action taken 
+            action (np.ndarray): Action taken 
         """
         with torch.inference_mode():
             obs = torch.from_numpy(obs).view(1, -1).float()
@@ -170,6 +171,6 @@ class HeroVehiclePolicy(BasePolicy):
         # scale position and velocity actions according to their scales defined during training
         scaled_action = [0.0] * len(action)
         scaled_action[:n_v] = action[:n_v] * self.VEL_ACTION_SCALE
-        scaled_action[n_v:n_v+n_p] = action[n_v:n_v+n_p]  * self.POS_ACTION_SCALE
+        scaled_action[n_v:n_v+n_p] = action[n_v:n_v+n_p] * self.POS_ACTION_SCALE
 
         return list(scaled_action)
