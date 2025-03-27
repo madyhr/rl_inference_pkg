@@ -24,7 +24,7 @@ class BasePolicy(abc.ABC):
         joint_offset: np.ndarray = None
     ) -> None:
         policy_path = self.load_policy_path(policy_name)
-        self.policy = torch.jit.load(policy_path)
+        self.policy = torch.jit.load(policy_name)
         self.policy.eval()
         self.joint_offset = joint_offset
         # Assume no scaling
@@ -41,8 +41,11 @@ class BasePolicy(abc.ABC):
         """
         Loads the path to the policy.pt file within the package directory.
 
+        Args:
+            policy_name (str): Name of policy file 
+
         Returns:
-            str: Absolute path to the policy.pt file, or None if not found.
+            policy_path (str): Absolute path to the policy.pt file, or None if not found.
         """
         try:
             package_path = ament_index_python.packages.get_package_share_directory('rl_inference_pkg')
@@ -91,8 +94,8 @@ class HeroVehiclePolicy(BasePolicy):
     Remember to call self.prepare_observation_dims() before calling any of the other functions.
     
     Args:
-        policy_name: str -- name of the file containing the policy in the pkg/policy/ directory
-        joint_offset: np.ndarray -- array of joint offsets 
+        policy_name (str): name of the file containing the policy in the pkg/policy/ directory
+        joint_offset (np.ndarray): array of joint offsets 
     """
 
     def __init__(
@@ -103,8 +106,8 @@ class HeroVehiclePolicy(BasePolicy):
         super().__init__(policy_name, joint_offset)
     
         # scales defined during learning 
-        self.POS_ACTION_SCALE: float = 0.5
-        self.VEL_ACTION_SCALE: float = 5.0
+        self.POS_ACTION_SCALE: float = 1.0
+        self.VEL_ACTION_SCALE: float = 1.0
 
         # maximum command velocities given during training
         self.CMD_LIN_VEL_MAX: float = 0.12
@@ -157,7 +160,7 @@ class HeroVehiclePolicy(BasePolicy):
             obs (np.ndarray): Observations composed in the manner described in compose_observation().
 
         Returns:
-            action (np.ndarray): Action taken 
+            action (List[float]): Action taken 
         """
         with torch.inference_mode():
             obs = torch.from_numpy(obs).view(1, -1).float()

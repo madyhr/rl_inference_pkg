@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from typing import List, Dict
+from typing import List, Dict, Tuple, Awaitable
 import copy
 import numpy as np
 
@@ -101,7 +101,6 @@ class RlPolicyNode(Node):
 
         # joints to keep still (i.e. they are outside action space), order does not matter here
         self.JOINT_STILL = [
-            
             f"leg{limbs[2]}joint2",
             f"leg{limbs[2]}joint6",
             f"leg{limbs[2]}joint4",
@@ -146,7 +145,7 @@ class RlPolicyNode(Node):
 
         self.timer = self.create_timer(0.02, self.timer_callback) # 50 Hz
         
-    def limb_setup(self):
+    def limb_setup(self) -> List[Tuple[Awaitable, Awaitable]]:
         """Initiates the limb setup procedure in Motion Stack API and returns list of Future's for the limbs."""
         self.get_logger().info(f"Trying to setup the following joints: {self.JOINT_ORDER}")
 
@@ -154,10 +153,7 @@ class RlPolicyNode(Node):
         rear_wheel_setup = self.rear_wheel.ready_up(set(self.REAR_WHEEL_JOINTS))
         leg_setup = self.leg.ready_up(set(self.LEG_JOINTS))
 
-        return [front_wheel_setup, 
-                rear_wheel_setup, 
-                leg_setup
-                ]
+        return [front_wheel_setup, rear_wheel_setup, leg_setup]
     
     def check_limb_ready(self):
         """Checks if all limbs on the robot are ready. 
@@ -207,6 +203,28 @@ class RlPolicyNode(Node):
             self.stop_wheels()
             self.inference_flag = False
 
+    def joint_dead_reckoning(self, joint_states: Dict[str, JState]) -> Tuple[List[float]]:
+        """Perform dead reckoning on the joint positions using the joint velocities.
+        
+        Args:
+            joint_states (Dict[str, JState]): Dictionary containing joint names and their associated joint states
+
+        Returns:
+            Tuple[List[float]]: Joint positions and velocities with dead reckoning estimate added.
+        """
+        current_time = ros_to_time(self.get_clock().now()).sec()
+
+        joint_pos = []
+        joint_vel = []
+
+        for state in joint_states.values():
+            time_diff = current_time - state.time.sec()
+            velocity = state.velocity if state.velocity is not None else 0.0
+            joint_pos.append(state.position + time_diff * velocity)
+            joint_vel.append(velocity)
+
+        return joint_pos, joint_vel
+
     def send_jstate(self, joint_handler: JointHandler, action_dict: Dict[str, float], action_type: str):
         """ Sends a JState to a JointHandler using the given dictionary of actions. UNSAFE."""
         ros_now = ros_to_time(self.get_clock().now())
@@ -222,7 +240,7 @@ class RlPolicyNode(Node):
             return 
 
     def stop_wheels(self):
-        # send a zero velocity command to all 4 wheels
+        """Send a zero velocity command to all 4 wheels."""
         front_wheel_action = {joint: 0.0 for joint in self.FRONT_WHEEL_JOINTS}
         rear_wheel_action = {joint: 0.0 for joint in self.REAR_WHEEL_JOINTS}
 
@@ -230,7 +248,7 @@ class RlPolicyNode(Node):
         self.send_jstate(self.rear_wheel, rear_wheel_action, action_type="velocity")
 
     def send_action(self, action: List[float]):
-        
+        """Send joint state commands using 'JointHandler's and 'JointSyncer's."""
         joint_actions = {j: a for (j,a) in zip(self.JOINT_ORDER, action)}
 
         # add offsets from training robot to real robot
@@ -276,15 +294,18 @@ class RlPolicyNode(Node):
         states = self.get_states()
         
         useful_states = [states.get(k) for k in self.JOINT_ORDER]
-
+        
+        # self.get_logger().info(str([f"{state.time.sec():.2f}" for state in useful_states]))
         if None in useful_states:
             self.get_logger().info(f"'None' in useful states")
             return
         
         # velocity elements may be None if no velocity command has been given 
-        joint_pos = [v.position for v in useful_states]
-        joint_vel = [v.velocity if v.velocity is not None else 0.0 for v in useful_states]
-
+        # joint_pos = [v.position for v in useful_states]
+        # joint_vel = [v.velocity if v.velocity is not None else 0.0 for v in useful_states]
+        
+        joint_pos, joint_vel = self.joint_dead_reckoning(useful_states)
+        
         obs = self.policy.compose_observation(
             joint_positions=np.array(wrap_to_pi(joint_pos)),
             joint_velocities=np.array(joint_vel),
@@ -294,7 +315,7 @@ class RlPolicyNode(Node):
 
         action = self.policy.get_action(obs)
 
-        # self.get_logger().info(f"Observation being received: {obs[:12]}")
+        # self.get_logger().info(f"Observation being received: {obs}")
         # self.get_logger().info(f"Action being sent: {action}")
 
         self.send_action(action)
