@@ -203,11 +203,11 @@ class RlPolicyNode(Node):
             self.stop_wheels()
             self.inference_flag = False
 
-    def joint_dead_reckoning(self, joint_states: Dict[str, JState]) -> Tuple[List[float]]:
+    def joint_dead_reckoning(self, joint_states: List[JState]) -> Tuple[List[float]]:
         """Perform dead reckoning on the joint positions using the joint velocities.
         
         Args:
-            joint_states (Dict[str, JState]): Dictionary containing joint names and their associated joint states
+            joint_states (List[JState]): List containing JStates with joint positions and velocity
 
         Returns:
             Tuple[List[float]]: Joint positions and velocities with dead reckoning estimate added.
@@ -249,7 +249,7 @@ class RlPolicyNode(Node):
 
     def send_action(self, action: List[float]):
         """Send joint state commands using 'JointHandler's and 'JointSyncer's."""
-        joint_actions = {j: a for (j,a) in zip(self.JOINT_ORDER, action)}
+        joint_actions = {joint: action for (joint,action) in zip(self.JOINT_ORDER, action)}
 
         # add offsets from training robot to real robot
         for joint in self.JOINT_ORDER:
@@ -264,14 +264,18 @@ class RlPolicyNode(Node):
 
         # keep joints outside action space still
         leg_no_action = {js.name: js.position for js in self.leg.states if js in self.JOINT_STILL}
-        # self.send_jstate(self.leg, leg_action, action_type="position")
-        # self.send_jstate(self.leg, leg_no_action, action_type="position")
         self.leg_sync.lerp(leg_action | leg_no_action)
         # TODO: check for: SensorSyncWarning: Syncer is out of sync with sensor data. Call `syncer.clear()` to reset the syncer onto the sensor position.
-        # self.get_logger().info("Action successfully sent.")
         # self.get_logger().info(f"Action being sent: {leg_action}")
 
     def get_states(self) -> Dict[str, JState]:
+        """
+        Get a dictionary with joint state names as keys and joint states as values.
+
+        Returns:
+            out (Dict[str, JState]): Dictionary of joint states with joint names as keys
+        
+        """
         out = {}
         out.update({v.name:v for v in self.front_wheel.states})
         out.update({v.name:v for v in self.rear_wheel.states})
@@ -326,10 +330,10 @@ def main(args=None):
     rclpy.init(args=args)
 
     # pretrained RL policy found in pkg/policy/ directory
-    policy_name = "20250319_17_policy.pt"
+    policy_name: str = "20250319_17_policy.pt"
     
     # limb numbers/id in order (front wheel, back wheel, bridge leg)
-    limbs = [12, 14, 1]
+    limbs: List[int] = [12, 14, 1]
     node = RlPolicyNode(policy_name, limbs)
 
     try:
