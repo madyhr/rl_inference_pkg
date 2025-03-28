@@ -17,7 +17,7 @@ You should clone this package into the same repository in `Motion-Stack/src`. Af
 ros2 launch rl_inference_pkg rl_policy_launch
 ```
 
-The policies that have been used so far also need a command velocity published as a `Twist` message at `/cmd_vel`. This can easily be done using ``teleop_twist_keyboard` which is run using
+The policies that have been used so far also need a command velocity published as a `Twist` message at `/cmd_vel`. This can easily be done using `teleop_twist_keyboard` which is run using
 
 ```
 ros2 run teleop_twist_keyboard teleop_twist_keyboard

@@ -24,7 +24,7 @@ class BasePolicy(abc.ABC):
         joint_offset: np.ndarray = None
     ) -> None:
         policy_path = self.load_policy_path(policy_name)
-        self.policy = torch.jit.load(policy_name)
+        self.policy = torch.jit.load(policy_path)
         self.policy.eval()
         self.joint_offset = joint_offset
         # Assume no scaling
@@ -54,7 +54,7 @@ class BasePolicy(abc.ABC):
             if os.path.exists(policy_path):
                 return policy_path
             else:
-                print(f"Error: policy.pt not found at {policy_path}")
+                print(f"Error: {policy_name} not found at {policy_path}")
                 return None
 
         except ament_index_python.packages.PackageNotFoundError:
