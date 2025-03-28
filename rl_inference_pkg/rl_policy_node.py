@@ -217,7 +217,7 @@ class RlPolicyNode(Node):
         joint_pos = []
         joint_vel = []
 
-        for state in joint_states.values():
+        for state in joint_states:
             time_diff = current_time - state.time.sec()
             velocity = state.velocity if state.velocity is not None else 0.0
             joint_pos.append(state.position + time_diff * velocity)

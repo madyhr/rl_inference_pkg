@@ -7,7 +7,7 @@ This package facilitates the inference of a reinforcement learning policy on rea
 
 The node `rl_policy_node.py` loads a PyTorch JIT policy located in the `policy/` folder. It then uses the joint state feedback from the Motion Stack to forward observations to the policy which in turn outputs actions. These actions are then sent to the robots using `JointHandler` and `JointSyncer` (see the Motion Stack documentation for more info on these). 
 
-> **Note**: Currently only the policies for the Hero Vehicle have been implemented and tested, but you could simply define a new one in `policies.py` and change which "legs" to interface with.
+> **Note**: Currently only a policy for the Hero Vehicle have been implemented and tested, but you could simply define a new one in `policies.py` and change which "legs" (in Motion Stack terminology) to interface with.
 
 ## How to use it
 
